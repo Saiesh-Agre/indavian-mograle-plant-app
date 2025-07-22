@@ -97,7 +97,7 @@ if selected_input:
 
 # Detection log + clips
 selected_name = os.path.splitext(selected_input)[0]
-detection_prefix = f"{OUTPUT_PREFIX}/{selected_name}_Detections"
+detection_prefix = f"{OUTPUT_PREFIX}/{selected_name}"
 log_key = f"{detection_prefix}/detection_csv/detection_log.csv"
 clips_prefix = f"{detection_prefix}/video_clips"
 
