@@ -127,7 +127,7 @@ if clip_files:
                 thumbnail = get_video_thumbnail(local_path_for_thumbnail) if local_path_for_thumbnail else None
                 with cols[j]:
                     if thumbnail:
-                        st.image(thumbnail, caption=clip_file, use_column_width=True)
+                        st.image(thumbnail, caption=clip_file, use_container_width=True)
                     if presigned_url:
                         st.video(presigned_url)
 else:
