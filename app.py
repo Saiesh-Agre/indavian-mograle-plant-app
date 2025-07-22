@@ -123,11 +123,11 @@ if clip_files:
                 clip_file = clip_files[i + j]
                 clip_key = f"{clips_prefix}/{clip_file}"
                 presigned_url = generate_presigned_url(clip_key)
-                local_path_for_thumbnail = download_s3_file(clip_key)  # Just for thumbnail
-                thumbnail = get_video_thumbnail(local_path_for_thumbnail) if local_path_for_thumbnail else None
+                #local_path_for_thumbnail = download_s3_file(clip_key)  # Just for thumbnail
+                #thumbnail = get_video_thumbnail(local_path_for_thumbnail) if local_path_for_thumbnail else None
                 with cols[j]:
-                    if thumbnail:
-                        st.image(thumbnail, caption=clip_file, use_container_width=True)
+                    #if thumbnail:
+                        #st.image(thumbnail, caption=clip_file, use_container_width=True)
                     if presigned_url:
                         st.video(presigned_url)
 else:
