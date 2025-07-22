@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 from PIL import Image
 import logging
+from datetime import datetime
 
 # Constants
 BUCKET_NAME = st.secrets["BUCKET_NAME"]
@@ -80,10 +81,42 @@ def get_video_thumbnail(video_path):
         logger.warning("Error extracting thumbnail: %s", e)
     return None
 
-# UI - Input video selection
-st.sidebar.header("Input Video Selection")
+# # UI - Input video selection
+# st.sidebar.header("Input Video Selection")
+# input_videos = list_s3_files(INPUT_PREFIX)
+# selected_input = st.sidebar.selectbox("Choose an input video", input_videos)
+
+
+
+
+
+# List and filter input videos by selected date
 input_videos = list_s3_files(INPUT_PREFIX)
-selected_input = st.sidebar.selectbox("Choose an input video", input_videos)
+
+# Extract unique dates from filenames
+video_date_map = {}
+for filename in input_videos:
+    try:
+        date_str = filename.split("_")[0]  # '2025-07-21'
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        video_date_map.setdefault(date_obj, []).append(filename)
+    except Exception as e:
+        logger.warning(f"Skipping file (invalid date format): {filename} | Error: {e}")
+
+available_dates = sorted(video_date_map.keys(), reverse=True)
+
+# Sidebar: Date filter
+st.sidebar.subheader("Filter by Date")
+selected_date = st.sidebar.date_input("Select date", value=available_dates[0] if available_dates else datetime.today().date())
+
+# Filtered videos for selected date
+filtered_videos = video_date_map.get(selected_date, [])
+if not filtered_videos:
+    st.sidebar.warning("No videos available for selected date.")
+selected_input = st.sidebar.selectbox("Choose an input video", filtered_videos) if filtered_videos else None
+
+
+
 
 # UI - Show selected video
 st.subheader("Selected Input Video")
