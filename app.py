@@ -96,13 +96,16 @@ st.subheader("Selected Input Video")
 if selected_input:
     input_key = f"{INPUT_PREFIX}/{selected_input}"
     local_input_path = download_s3_file(input_key)
+    # if local_input_path:
+    #     thumbnail = get_video_thumbnail(local_input_path)
+    #     if thumbnail:
+    #         html_vid = get_video_tag_with_thumbnail(local_input_path, thumbnail)
+    #         st.markdown(html_vid, unsafe_allow_html=True)
+    #     else:
+    #         st.warning("Could not extract thumbnail.")
     if local_input_path:
-        thumbnail = get_video_thumbnail(local_input_path)
-        if thumbnail:
-            html_vid = get_video_tag_with_thumbnail(local_input_path, thumbnail)
-            st.markdown(html_vid, unsafe_allow_html=True)
-        else:
-            st.warning("Could not extract thumbnail.")
+       # simple local playback
+       st.video(local_input_path)
     else:
         st.error("Failed to download selected input video.")
 
