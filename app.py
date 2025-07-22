@@ -120,6 +120,7 @@ selected_input = st.sidebar.selectbox("Choose an input video", filtered_videos) 
 
 # UI - Show selected video
 st.subheader("Selected Input Video")
+
 if selected_input:
     input_key = f"{INPUT_PREFIX}/{selected_input}"
     input_url = generate_presigned_url(input_key)
@@ -128,69 +129,68 @@ if selected_input:
     else:
         st.error("Could not generate URL for input video.")
 
-# Detection log + clips
-selected_name = os.path.splitext(selected_input)[0]
-detection_prefix = f"{OUTPUT_PREFIX}/{selected_name}"
-log_key = f"{detection_prefix}/detection_csv/detection_log.csv"
-clips_prefix = f"{detection_prefix}/video_clips"
+    # Detection log + clips
+    selected_name = os.path.splitext(selected_input)[0]
+    detection_prefix = f"{OUTPUT_PREFIX}/{selected_name}"
+    log_key = f"{detection_prefix}/detection_csv/detection_log.csv"
+    clips_prefix = f"{detection_prefix}/video_clips"
 
-# Detection log loading
-try:
-    log_obj = s3.get_object(Bucket=BUCKET_NAME, Key=log_key)
-    df_log = pd.read_csv(log_obj["Body"])
-except Exception as e:
-    logger.warning("Detection log not found: %s", e)
-    st.warning("Detection log not found in S3. Run the processing script first.")
-    st.stop()
+    # Detection log loading
+    try:
+        log_obj = s3.get_object(Bucket=BUCKET_NAME, Key=log_key)
+        df_log = pd.read_csv(log_obj["Body"])
+    except Exception as e:
+        logger.warning("Detection log not found: %s", e)
+        st.warning("Detection log not found in S3. Run the processing script first.")
+        st.stop()
 
-# UI - Saved clips grid
-st.subheader("Saved Clips")
-clip_files = list_s3_files(clips_prefix)
+    # Saved clips grid
+    st.subheader("Saved Clips")
+    clip_files = list_s3_files(clips_prefix)
 
-if clip_files:
-    num_cols = 3
-    for i in range(0, len(clip_files), num_cols):
-        cols = st.columns(num_cols)
-        for j in range(num_cols):
-            if i + j < len(clip_files):
-                clip_file = clip_files[i + j]
-                clip_key = f"{clips_prefix}/{clip_file}"
-                presigned_url = generate_presigned_url(clip_key)
-                #local_path_for_thumbnail = download_s3_file(clip_key)  # Just for thumbnail
-                #thumbnail = get_video_thumbnail(local_path_for_thumbnail) if local_path_for_thumbnail else None
-                with cols[j]:
-                    #if thumbnail:
-                        #st.image(thumbnail, caption=clip_file, use_container_width=True)
-                    if presigned_url:
-                        st.video(presigned_url)
+    if clip_files:
+        num_cols = 3
+        for i in range(0, len(clip_files), num_cols):
+            cols = st.columns(num_cols)
+            for j in range(num_cols):
+                if i + j < len(clip_files):
+                    clip_file = clip_files[i + j]
+                    clip_key = f"{clips_prefix}/{clip_file}"
+                    presigned_url = generate_presigned_url(clip_key)
+                    with cols[j]:
+                        if presigned_url:
+                            st.video(presigned_url)
+    else:
+        st.info("No clips saved for the selected target class.")
+
+    # Pie chart
+    st.subheader("Detection Proportions by Class")
+    try:
+        class_counts = df_log['class'].value_counts()
+        fig, ax = plt.subplots()
+        ax.pie(class_counts, labels=class_counts.index, autopct='%1.1f%%', startangle=90)
+        ax.axis('equal')
+        st.pyplot(fig)
+        st.write("**Total Detections:**", len(df_log))
+    except Exception as e:
+        logger.warning("Failed to generate pie chart: %s", e)
+
+    # Detection table
+    st.subheader("Detection Log Table")
+    try:
+        if 'latitude' not in df_log.columns:
+            df_log['latitude'] = 12.9716
+        if 'longitude' not in df_log.columns:
+            df_log['longitude'] = 77.5946
+        if 'video_link' not in df_log.columns:
+            df_log['video_link'] = f"s3://{BUCKET_NAME}/{clips_prefix}/{clip_files[0]}" if clip_files else "N/A"
+        st.dataframe(df_log[['class', 'video_link', 'timestamp', 'latitude', 'longitude']])
+    except Exception as e:
+        logger.error("Error displaying detection table: %s", e)
+        st.error("Could not load detection log table.")
 else:
-    st.info("No clips saved for the selected target class.")
+    st.info("Please select a video with available detections.")
 
-# UI - Pie chart
-st.subheader("Detection Proportions by Class")
-try:
-    class_counts = df_log['class'].value_counts()
-    fig, ax = plt.subplots()
-    ax.pie(class_counts, labels=class_counts.index, autopct='%1.1f%%', startangle=90)
-    ax.axis('equal')
-    st.pyplot(fig)
-    st.write("**Total Detections:**", len(df_log))
-except Exception as e:
-    logger.warning("Failed to generate pie chart: %s", e)
-
-# UI - Detection log table
-st.subheader("Detection Log Table")
-try:
-    if 'latitude' not in df_log.columns:
-        df_log['latitude'] = 12.9716
-    if 'longitude' not in df_log.columns:
-        df_log['longitude'] = 77.5946
-    if 'video_link' not in df_log.columns:
-        df_log['video_link'] = f"s3://{BUCKET_NAME}/{clips_prefix}/{clip_files[0]}" if clip_files else "N/A"
-    st.dataframe(df_log[['class', 'video_link', 'timestamp', 'latitude', 'longitude']])
-except Exception as e:
-    logger.error("Error displaying detection table: %s", e)
-    st.error("Could not load detection log table.")
 
 st.markdown("---")
 st.write("*Dashboard generated by Streamlit.*")
