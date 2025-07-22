@@ -4,24 +4,21 @@ import boto3
 import tempfile
 import cv2
 import os
-import base64
 import matplotlib.pyplot as plt
 from io import BytesIO
 from PIL import Image
 import logging
 
-
-BUCKET_NAME=st.secrets["BUCKET_NAME"]
+# Constants
+BUCKET_NAME = st.secrets["BUCKET_NAME"]
 INPUT_PREFIX = "Input"
 OUTPUT_PREFIX = "Output"
 
-
-
-# Setup logging
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Constants (ensure these are securely loaded in real deployment)
+# S3 client setup
 try:
     s3 = boto3.client(
         "s3",
@@ -37,9 +34,10 @@ except Exception as e:
 st.set_page_config(page_title="Indavian Mograle Plant Dashboard", layout="wide")
 st.title("Indavian Mograle Plant Dashboard")
 
+# Utility: List S3 files
 def list_s3_files(prefix, suffixes=(".mp4", ".avi", ".mov")):
     try:
-        response = s3.list_objects_v2(Bucket=st.secrets["BUCKET_NAME"], Prefix=prefix)
+        response = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
         files = [os.path.basename(obj["Key"]) for obj in response.get("Contents", [])
                  if obj["Key"].lower().endswith(suffixes) and not obj["Key"].endswith("/")]
         return files
@@ -47,6 +45,7 @@ def list_s3_files(prefix, suffixes=(".mp4", ".avi", ".mov")):
         logger.error("Error listing files from S3: %s", e)
         return []
 
+# Utility: Download file from S3 (still used for thumbnails)
 def download_s3_file(key):
     try:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
@@ -56,6 +55,19 @@ def download_s3_file(key):
         logger.error("Error downloading file from S3: %s", e)
         return None
 
+# Utility: Generate pre-signed URL
+def generate_presigned_url(key, expiration=3600):
+    try:
+        return s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': BUCKET_NAME, 'Key': key},
+            ExpiresIn=expiration
+        )
+    except Exception as e:
+        logger.error("Error generating presigned URL: %s", e)
+        return None
+
+# Utility: Extract video thumbnail
 def get_video_thumbnail(video_path):
     try:
         cap = cv2.VideoCapture(video_path)
@@ -68,52 +80,28 @@ def get_video_thumbnail(video_path):
         logger.warning("Error extracting thumbnail: %s", e)
     return None
 
-def get_video_tag_with_thumbnail(video_path, thumbnail_image):
-    try:
-        buffered = BytesIO()
-        thumbnail_image.save(buffered, format="JPEG")
-        encoded_thumbnail = base64.b64encode(buffered.getvalue()).decode()
-
-        with open(video_path, "rb") as video_file:
-            encoded_video = base64.b64encode(video_file.read()).decode()
-
-        html_video = f"""
-        <video width="100%" height="auto" controls poster="data:image/jpeg;base64,{encoded_thumbnail}">
-            <source src="data:video/mp4;base64,{encoded_video}" type="video/mp4">
-            Your browser does not support the video tag.
-        </video>
-        """
-        return html_video
-    except Exception as e:
-        logger.error("Error generating video tag: %s", e)
-        return "<p>Video could not be rendered.</p>"
-
+# UI - Input video selection
 st.sidebar.header("Input Video Selection")
 input_videos = list_s3_files(INPUT_PREFIX)
 selected_input = st.sidebar.selectbox("Choose an input video", input_videos)
 
+# UI - Show selected video
 st.subheader("Selected Input Video")
 if selected_input:
     input_key = f"{INPUT_PREFIX}/{selected_input}"
-    local_input_path = download_s3_file(input_key)
-    # if local_input_path:
-    #     thumbnail = get_video_thumbnail(local_input_path)
-    #     if thumbnail:
-    #         html_vid = get_video_tag_with_thumbnail(local_input_path, thumbnail)
-    #         st.markdown(html_vid, unsafe_allow_html=True)
-    #     else:
-    #         st.warning("Could not extract thumbnail.")
-    if local_input_path:
-       # simple local playback
-       st.video(local_input_path)
+    input_url = generate_presigned_url(input_key)
+    if input_url:
+        st.video(input_url)
     else:
-        st.error("Failed to download selected input video.")
+        st.error("Could not generate URL for input video.")
 
-selected_name = os.path.splitext(selected_input)[0]  # "sample" from "sample.mp4"
+# Detection log + clips
+selected_name = os.path.splitext(selected_input)[0]
 detection_prefix = f"{OUTPUT_PREFIX}/{selected_name}_Detections"
 log_key = f"{detection_prefix}/detection_csv/detection_log.csv"
 clips_prefix = f"{detection_prefix}/video_clips"
 
+# Detection log loading
 try:
     log_obj = s3.get_object(Bucket=BUCKET_NAME, Key=log_key)
     df_log = pd.read_csv(log_obj["Body"])
@@ -122,6 +110,7 @@ except Exception as e:
     st.warning("Detection log not found in S3. Run the processing script first.")
     st.stop()
 
+# UI - Saved clips grid
 st.subheader("Saved Clips")
 clip_files = list_s3_files(clips_prefix)
 
@@ -133,16 +122,18 @@ if clip_files:
             if i + j < len(clip_files):
                 clip_file = clip_files[i + j]
                 clip_key = f"{clips_prefix}/{clip_file}"
-                local_clip_path = download_s3_file(clip_key)
-                if local_clip_path:
-                    thumbnail = get_video_thumbnail(local_clip_path)
-                    with cols[j]:
-                        if thumbnail:
-                            html_vid = get_video_tag_with_thumbnail(local_clip_path, thumbnail)
-                            st.markdown(html_vid, unsafe_allow_html=True)
+                presigned_url = generate_presigned_url(clip_key)
+                local_path_for_thumbnail = download_s3_file(clip_key)  # Just for thumbnail
+                thumbnail = get_video_thumbnail(local_path_for_thumbnail) if local_path_for_thumbnail else None
+                with cols[j]:
+                    if thumbnail:
+                        st.image(thumbnail, caption=clip_file, use_column_width=True)
+                    if presigned_url:
+                        st.video(presigned_url)
 else:
     st.info("No clips saved for the selected target class.")
 
+# UI - Pie chart
 st.subheader("Detection Proportions by Class")
 try:
     class_counts = df_log['class'].value_counts()
@@ -154,6 +145,7 @@ try:
 except Exception as e:
     logger.warning("Failed to generate pie chart: %s", e)
 
+# UI - Detection log table
 st.subheader("Detection Log Table")
 try:
     if 'latitude' not in df_log.columns:
@@ -162,7 +154,6 @@ try:
         df_log['longitude'] = 77.5946
     if 'video_link' not in df_log.columns:
         df_log['video_link'] = f"s3://{BUCKET_NAME}/{clips_prefix}/{clip_files[0]}" if clip_files else "N/A"
-
     st.dataframe(df_log[['class', 'video_link', 'timestamp', 'latitude', 'longitude']])
 except Exception as e:
     logger.error("Error displaying detection table: %s", e)
