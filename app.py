@@ -61,7 +61,7 @@ def generate_presigned_url(key, expiration=3600):
     try:
         return s3.generate_presigned_url(
             'get_object',
-            Params={'Bucket': BUCKET_NAME, 'Key': key},
+            Params={'Bucket': BUCKET_NAME, 'Key': key, 'ResponseContentType': 'video/mp4'},
             ExpiresIn=expiration
         )
     except Exception as e:
