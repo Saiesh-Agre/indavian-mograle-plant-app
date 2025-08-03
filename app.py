@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 import boto3
 import pymysql
-import cv2
-import os
 import matplotlib.pyplot as plt
 from datetime import datetime
 from PIL import Image
 import logging
+import streamlit.components.v1 as components
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -18,22 +17,46 @@ st.set_page_config(page_title="Indavian Mograle Plant Dashboard", layout="wide")
 st.markdown(
     """
     <style>
-    /* App background and text */
     .stApp {
         background-color: #1e1e2f;
         color: #ffffff;
     }
-    /* Tile styling */
+
     .tile {
         background-color: #252639;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 0 10px rgba(0,0,0,0.3);
     }
-    /* Subheaders */
+
     .tile h2, .tile h3 {
-        color: #ffffff;
+        color: #ffffff !important;
         margin-top: 0;
+    }
+
+    label, .stSelectbox label, .stDateInput label {
+        color: white !important;
+    }
+
+    div[data-baseweb="select"], .stDateInput, input, textarea {
+        background-color: #2c2f4a !important;
+        color: white !important;
+        border: 1px solid #444 !important;
+    }
+
+    .stDataFrameContainer, .stDataFrame {
+        background-color: #1e1e2f !important;
+        color: white !important;
+    }
+
+    .matplotlib-figure {
+        background-color: transparent !important;
+    }
+
+    .section-divider {
+        margin: 30px 0;
+        border-top: 2px solid #444;
     }
     </style>
     """, unsafe_allow_html=True
@@ -104,18 +127,27 @@ if df_jobs.empty:
     st.stop()
 
 # --- Top Filters ---
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 df_jobs['upload_date'] = pd.to_datetime(df_jobs['upload_timestamp']).dt.date
 available_dates = sorted(df_jobs['upload_date'].unique(), reverse=True)
+
 col1, col2 = st.columns(2)
-selected_date = col1.date_input(
-    "Filter by Date",
-    value=available_dates[0] if available_dates else datetime.today().date()
-)
+
+with col1:
+    selected_date = st.date_input(
+        label="Filter by Date",
+        value=available_dates[0] if available_dates else datetime.today().date(),
+        key="date_picker"
+    )
+
 filtered_df = df_jobs[df_jobs['upload_date'] == selected_date]
 if filtered_df.empty:
     st.warning("No videos found for selected date.")
     st.stop()
-selected_file = col2.selectbox("Select Video", filtered_df['file_name'].tolist())
+
+with col2:
+    selected_file = st.selectbox("Select Video", filtered_df['file_name'].tolist())
+
 selected_row = filtered_df[filtered_df['file_name'] == selected_file].iloc[0]
 
 # Parse S3 keys and URLs
@@ -143,54 +175,76 @@ def list_clip_files(prefix):
         return []
 clip_keys = list_clip_files(clips_prefix)
 
-# --- 2x2 Dashboard Layout with Tiles ---
-# Row 1: Original Video | Pie Chart
+# --- Dashboard Layout ---
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 row1_col1, row1_col2 = st.columns(2)
 with row1_col1:
-    st.markdown('<div class="tile">', unsafe_allow_html=True)
     st.subheader("Original Video")
     if input_url:
         st.video(input_url)
     else:
         st.error("Could not generate URL for input video.")
-    st.markdown('</div>', unsafe_allow_html=True)
 
 with row1_col2:
-    st.markdown('<div class="tile">', unsafe_allow_html=True)
     st.subheader("Detection Proportions by Class")
     try:
         class_counts = df_log['class'].value_counts()
-        fig, ax = plt.subplots()
-        ax.pie(class_counts, labels=class_counts.index, autopct='%1.1f%%', startangle=90)
+        fig, ax = plt.subplots(figsize=(6, 6), facecolor='#252639')
+        wedges, texts, autotexts = ax.pie(
+            class_counts,
+            labels=class_counts.index,
+            autopct='%1.1f%%',
+            startangle=90,
+            textprops={'color': "white"}
+        )
         ax.axis('equal')
-        st.pyplot(fig)
-        st.write("**Total Detections:**", len(df_log))
+
+        legend_labels = [f"{cls} = {count}" for cls, count in class_counts.items()]
+        ax.legend(
+            wedges,
+            legend_labels,
+            loc="center left",
+            bbox_to_anchor=(1, 0, 0.5, 1),
+            labelcolor='white',
+            frameon=False
+        )
+
+        st.pyplot(fig, transparent=True)
+        st.markdown(
+            f'<div style="text-align:center;">Total Detections: {len(df_log)}</div>',
+            unsafe_allow_html=True
+        )
     except Exception as e:
         logger.warning("Failed to generate pie chart: %s", e)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-# Row 2: Saved Clips | Detection Log Table
+# Divider
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 row2_col1, row2_col2 = st.columns(2)
+
 with row2_col1:
-    st.markdown('<div class="tile">', unsafe_allow_html=True)
     st.subheader("Saved Clips")
+
     if clip_keys:
-        num_cols = 3
-        for i in range(0, len(clip_keys), num_cols):
-            cols = st.columns(num_cols)
-            for j in range(num_cols):
-                if i + j < len(clip_keys):
-                    key = clip_keys[i + j]
-                    url = generate_presigned_url(key)
-                    if url:
-                        with cols[j]:
-                            st.video(url)
+        video_html = '<div style="max-height:600px; overflow-y:auto; padding:10px; border:1px solid #444; border-radius:10px; background-color:#252639; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">'
+
+        for i, key in enumerate(clip_keys):
+            url = generate_presigned_url(key)
+            if url:
+                video_html += f'''
+                <div style="">
+                    <video width="100%" height="160" controls>
+                        <source src="{url}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+                '''
+
+        video_html += '</div>'
+        components.html(video_html, height=400)
     else:
         st.info("No clips available.")
-    st.markdown('</div>', unsafe_allow_html=True)
 
 with row2_col2:
-    st.markdown('<div class="tile">', unsafe_allow_html=True)
     st.subheader("Detection Log Table")
     try:
         if 'latitude' not in df_log.columns:
@@ -203,7 +257,6 @@ with row2_col2:
     except Exception as e:
         logger.error("Error displaying detection table: %s", e)
         st.error("Could not load detection log table.")
-    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("---")
+st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 st.write("*Dashboard powered by RDS + Streamlit.*")
