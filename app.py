@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import boto3
 import pymysql
-import tempfile
 import cv2
 import os
 import matplotlib.pyplot as plt
@@ -14,8 +13,32 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Streamlit setup
+# Streamlit setup with dark theme CSS
 st.set_page_config(page_title="Indavian Mograle Plant Dashboard", layout="wide")
+st.markdown(
+    """
+    <style>
+    /* App background and text */
+    .stApp {
+        background-color: #1e1e2f;
+        color: #ffffff;
+    }
+    /* Tile styling */
+    .tile {
+        background-color: #252639;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+    /* Subheaders */
+    .tile h2, .tile h3 {
+        color: #ffffff;
+        margin-top: 0;
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
+
 st.title("Indavian Mograle Plant Dashboard")
 
 # S3 Setup
@@ -74,49 +97,29 @@ def generate_presigned_url(key, expiration=3600):
         logger.error("Error generating presigned URL: %s", e)
         return None
 
-# Extract thumbnail (optional)
-def get_video_thumbnail(video_path):
-    try:
-        cap = cv2.VideoCapture(video_path)
-        ret, frame = cap.read()
-        cap.release()
-        if ret:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            return Image.fromarray(frame_rgb)
-    except Exception as e:
-        logger.warning("Thumbnail error: %s", e)
-    return None
-
 # Load jobs
 df_jobs = get_successful_jobs()
-
 if df_jobs.empty:
     st.warning("No processed videos found in the database.")
     st.stop()
 
-# Sidebar: Date Filter
+# --- Top Filters ---
 df_jobs['upload_date'] = pd.to_datetime(df_jobs['upload_timestamp']).dt.date
 available_dates = sorted(df_jobs['upload_date'].unique(), reverse=True)
-selected_date = st.sidebar.date_input("Filter by Date", value=available_dates[0] if available_dates else datetime.today().date())
+col1, col2 = st.columns(2)
+selected_date = col1.date_input(
+    "Filter by Date",
+    value=available_dates[0] if available_dates else datetime.today().date()
+)
 filtered_df = df_jobs[df_jobs['upload_date'] == selected_date]
-
-# Sidebar: Video Selection
 if filtered_df.empty:
-    st.sidebar.warning("No videos found for selected date.")
+    st.warning("No videos found for selected date.")
     st.stop()
-
-selected_file = st.sidebar.selectbox("Select Video", filtered_df['file_name'].tolist())
+selected_file = col2.selectbox("Select Video", filtered_df['file_name'].tolist())
 selected_row = filtered_df[filtered_df['file_name'] == selected_file].iloc[0]
 
-# Show selected video
-st.subheader("Selected Input Video")
+# Parse S3 keys and URLs
 input_url = generate_presigned_url(selected_row['s3_video_key'])
-if input_url:
-    st.video(input_url)
-else:
-    st.error("Could not generate URL for input video.")
-
-# Parse output path for detections
 output_prefix = selected_row['s3_output_key'].rstrip("/")
 log_key = f"{output_prefix}/detection_csv/detection_log.csv"
 clips_prefix = f"{output_prefix}/video_clips"
@@ -130,8 +133,7 @@ except Exception as e:
     st.warning("Detection log not found in S3. Run processing first.")
     st.stop()
 
-# Show clips
-st.subheader("Saved Clips")
+# List clips
 def list_clip_files(prefix):
     try:
         response = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
@@ -139,47 +141,69 @@ def list_clip_files(prefix):
     except Exception as e:
         logger.error("Failed to list clips: %s", e)
         return []
-
 clip_keys = list_clip_files(clips_prefix)
-if clip_keys:
-    num_cols = 3
-    for i in range(0, len(clip_keys), num_cols):
-        cols = st.columns(num_cols)
-        for j in range(num_cols):
-            if i + j < len(clip_keys):
-                key = clip_keys[i + j]
-                url = generate_presigned_url(key)
-                if url:
-                    with cols[j]:
-                        st.video(url)
-else:
-    st.info("No clips available.")
 
-# Pie chart
-st.subheader("Detection Proportions by Class")
-try:
-    class_counts = df_log['class'].value_counts()
-    fig, ax = plt.subplots()
-    ax.pie(class_counts, labels=class_counts.index, autopct='%1.1f%%', startangle=90)
-    ax.axis('equal')
-    st.pyplot(fig)
-    st.write("**Total Detections:**", len(df_log))
-except Exception as e:
-    logger.warning("Failed to generate pie chart: %s", e)
+# --- 2x2 Dashboard Layout with Tiles ---
+# Row 1: Original Video | Pie Chart
+row1_col1, row1_col2 = st.columns(2)
+with row1_col1:
+    st.markdown('<div class="tile">', unsafe_allow_html=True)
+    st.subheader("Original Video")
+    if input_url:
+        st.video(input_url)
+    else:
+        st.error("Could not generate URL for input video.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# Detection table
-st.subheader("Detection Log Table")
-try:
-    if 'latitude' not in df_log.columns:
-        df_log['latitude'] = 12.9716
-    if 'longitude' not in df_log.columns:
-        df_log['longitude'] = 77.5946
-    if 'video_link' not in df_log.columns:
-        df_log['video_link'] = f"s3://{BUCKET_NAME}/{clip_keys[0]}" if clip_keys else "N/A"
-    st.dataframe(df_log[['class', 'video_link', 'timestamp', 'latitude', 'longitude']])
-except Exception as e:
-    logger.error("Error displaying detection table: %s", e)
-    st.error("Could not load detection log table.")
+with row1_col2:
+    st.markdown('<div class="tile">', unsafe_allow_html=True)
+    st.subheader("Detection Proportions by Class")
+    try:
+        class_counts = df_log['class'].value_counts()
+        fig, ax = plt.subplots()
+        ax.pie(class_counts, labels=class_counts.index, autopct='%1.1f%%', startangle=90)
+        ax.axis('equal')
+        st.pyplot(fig)
+        st.write("**Total Detections:**", len(df_log))
+    except Exception as e:
+        logger.warning("Failed to generate pie chart: %s", e)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Row 2: Saved Clips | Detection Log Table
+row2_col1, row2_col2 = st.columns(2)
+with row2_col1:
+    st.markdown('<div class="tile">', unsafe_allow_html=True)
+    st.subheader("Saved Clips")
+    if clip_keys:
+        num_cols = 3
+        for i in range(0, len(clip_keys), num_cols):
+            cols = st.columns(num_cols)
+            for j in range(num_cols):
+                if i + j < len(clip_keys):
+                    key = clip_keys[i + j]
+                    url = generate_presigned_url(key)
+                    if url:
+                        with cols[j]:
+                            st.video(url)
+    else:
+        st.info("No clips available.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with row2_col2:
+    st.markdown('<div class="tile">', unsafe_allow_html=True)
+    st.subheader("Detection Log Table")
+    try:
+        if 'latitude' not in df_log.columns:
+            df_log['latitude'] = 12.9716
+        if 'longitude' not in df_log.columns:
+            df_log['longitude'] = 77.5946
+        if 'video_link' not in df_log.columns:
+            df_log['video_link'] = f"s3://{BUCKET_NAME}/{clip_keys[0]}" if clip_keys else "N/A"
+        st.dataframe(df_log[['class', 'video_link', 'timestamp', 'latitude', 'longitude']])
+    except Exception as e:
+        logger.error("Error displaying detection table: %s", e)
+        st.error("Could not load detection log table.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 st.write("*Dashboard powered by RDS + Streamlit.*")
