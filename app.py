@@ -240,7 +240,7 @@ with row2_col1:
                 '''
 
         video_html += '</div>'
-        components.html(video_html, height=600)
+        components.html(video_html, height=650)
     else:
         st.info("No clips available.")
 
