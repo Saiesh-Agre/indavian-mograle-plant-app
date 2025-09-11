@@ -203,7 +203,7 @@ with row1_col2:
         ax.legend(
             wedges,
             legend_labels,
-            loc="center bottom",
+            loc="lower center",
             bbox_to_anchor=(1, 0, 0.5, 1),
             labelcolor='white',
             frameon=False
