@@ -143,7 +143,7 @@ with col1:
 filtered_df = df_jobs[df_jobs['upload_date'] == selected_date]
 if filtered_df.empty:
     st.warning("No videos found for selected date.")
-    st.stop()
+    #st.stop()
 
 with col2:
     selected_file = st.selectbox("Select Video", filtered_df['file_name'].tolist())
